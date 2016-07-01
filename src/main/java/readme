@@ -1,0 +1,74 @@
+sgck-sync组件提供了上下级服务器双向调用的能力，无论是上级服务器代理（UpperServerStub）还是下级服务器代理（LowerServerStub）都提供了3类接口调用：
+1、invoke(rpcObj,callback) 发起一个远程调用，并查看调用结果。
+        此类调用对象存在内存中，因此此类型的任务队列不会太大，默认是100.当服务器负载很重导致任务堆积时，可能因为超过任务队列的最大限制而调用失败。
+2、invoke(rpcObj) 发起一个远程调用，不关心调用结果。
+       此调用类型跟上一个调用类型基本一样，唯一的区别是：此调用不关心调用结果
+3、sync(rpcObj) 发起一个同步请求
+      此调用对象会存盘，并保证执行，即使程序重启。但此类调用不能设置回调。
+      
+      
+使用场景：
+1、invoke系列的函数可用于上下级服务器同步实时数据，实时状态或即时调用
+2、sync函数可以用于上下级同步持久化数据，如：历史数据，系统事件，消息等。
+
+使用方法：
+此组件的Spring配置信息如下：
+	<!-- 启用上下级服务器同步功能 -->
+	<import resource="sgck-sync-inline-context.xml" />
+	
+	<!-- 上下级服务器同步组件的配置信息 ，必须提供-->
+	<bean id="syncServiceConfig" class="com.sgck.sync.config.DefaultSyncServiceConfig">
+		<!-- 同步服务的工作目录，用于存放同步服务需要的配置，需要缓存的数据等.，默认为 /admin/sync -->
+		<property name="syncWorkDir" value="D:/admin/sync"></property>
+		 <!-- 上下级服务器的心跳包间隔，以秒为单位. 默认为3秒 -->
+		<property name="syncHeartBeatInterval" value="3"></property>
+	</bean>
+	
+	<!-- 下级服务器代理，如果没有下级服务器，不需要配置 -->
+	<bean id="lowerServerStub" class="com.sgck.sync.stub.DefaultLowerServerStub"
+		init-method="init" scope="singleton">
+	</bean>
+	
+	<!-- 上级服务器代理，如果没有上级服务器，不需要配置 -->
+	<bean id="upperServerStub" class="com.sgck.sync.stub.DefaultUpperServerStub"
+		init-method="init" scope="singleton"> 
+	</bean>
+	
+示例代码：
+	@Autowired
+	private UpperServerStub upperServerStub;
+	
+	@Autowired
+	private SyncServiceConfig config;
+	
+	String localServerId = config.getLocalServerInfoProvider().getLocalServerInfo().getServerId();
+			
+	//需要关注任务处理结果
+	upperServerStub.invoke(InvokeObjectWrapper.packInvokeObject("RemoteServerHandler", "getUpdataExtraMap"),
+			new InvokeCallback() {
+				@Override
+				public void onOK(Object result) {
+					System.out.println("result: " + result);
+				}
+				
+				@Override
+				public void onError(Object error) {
+					System.out.println(error);
+				}
+			});
+	//不需要关注任务处理结果
+	upperServerStub.invoke(InvokeObjectWrapper.packInvokeObject("RemoteServerHandler", "UpdateDataSourceAlgCfg","12312","dummy"));
+	
+	//发起一个同步任务，该任务会保证执行。即使程序重启。
+	upperServerStub.sync(InvokeObjectWrapper.packInvokeObject("RemoteServerHandler", "delAlgConfigMap","123123123123"));
+最佳实践：
+	在每个用到此组件的项目中，强烈建议建立以下的包结构（以sg8k项目为例）：com.sg8k.sync,此包下面建立两个类：
+	LowerServerHandler(用于处理下级服务器的调用请求)
+	UpperServerHandler(用于处理上级服务器的调用请求)
+	最终的包结构如下：
+	com.sg8k.sync
+		|
+		\__LowerServerHandler.java
+		|
+		\__UpperServerHandler.java
+			
